@@ -1,6 +1,6 @@
 import { FloodReport } from '../types/report';
 import { db, isFirebaseConfigured } from './firebase';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, collection, getDocs, onSnapshot } from 'firebase/firestore';
 
 const DB_NAME = 'resq_dispatch_offline_db';
 const DB_VERSION = 1;
@@ -75,12 +75,64 @@ export async function getSyncedReports(): Promise<FloodReport[]> {
   });
 }
 
+export function parseFirestoreDoc(id: string, data: any): FloodReport {
+  let receivedAtStr: string | null = null;
+  if (data.receivedAt) {
+    if (typeof data.receivedAt.toDate === 'function') {
+      receivedAtStr = data.receivedAt.toDate().toISOString();
+    } else if (typeof data.receivedAt === 'string') {
+      receivedAtStr = data.receivedAt;
+    }
+  }
+
+  return {
+    id,
+    text: data.text || '',
+    location: data.location || { lat: 0, lng: 0, source: 'manual' },
+    clientCreatedAt: data.clientCreatedAt || new Date().toISOString(),
+    receivedAt: receivedAtStr,
+    synced: true,
+    preliminaryNeed: data.preliminaryNeed,
+    photoBase64: data.photoBase64,
+    audioBase64: data.audioBase64,
+    audioDurationSec: data.audioDurationSec,
+    contactPhone: data.contactPhone,
+    aiExtracted: data.aiExtracted,
+    incidentId: data.incidentId,
+    urgency: data.urgency,
+    confidence: data.confidence,
+  };
+}
+
 export async function getAllReports(): Promise<FloodReport[]> {
   const queued = await getQueuedReports();
-  const synced = await getSyncedReports();
-  // Return combined, ordered by clientCreatedAt descending
-  const combined = [...queued, ...synced];
-  return combined.sort((a, b) => new Date(b.clientCreatedAt).getTime() - new Date(a.clientCreatedAt).getTime());
+  let synced: FloodReport[] = [];
+
+  if (isFirebaseConfigured && db) {
+    try {
+      const snap = await getDocs(collection(db, 'reports'));
+      snap.forEach((docSnap) => {
+        synced.push(parseFirestoreDoc(docSnap.id, docSnap.data()));
+      });
+    } catch (err) {
+      console.warn('[RESQ-Dispatch] Firestore read fallback to local store:', err);
+      synced = await getSyncedReports();
+    }
+  } else {
+    synced = await getSyncedReports();
+  }
+
+  const map = new Map<string, FloodReport>();
+  for (const s of synced) {
+    map.set(s.id, s);
+  }
+  for (const q of queued) {
+    map.set(q.id, { ...q, synced: false });
+  }
+
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(b.clientCreatedAt).getTime() - new Date(a.clientCreatedAt).getTime()
+  );
 }
 
 async function notifyListeners(): Promise<void> {
@@ -190,12 +242,26 @@ async function syncSingleReport(report: FloodReport): Promise<FloodReport> {
 
   if (isFirebaseConfigured && db) {
     try {
-      // Idempotent write via setDoc with client ID
+      // Idempotent write via setDoc with client-generated ID into Firestore "reports" collection
       const reportRef = doc(db, 'reports', report.id);
-      await setDoc(reportRef, {
-        ...updatedReport,
-        firestoreReceivedAt: serverTimestamp(),
-      }, { merge: true });
+      
+      const firestoreData: Record<string, any> = {
+        id: report.id,
+        text: report.text || '',
+        location: report.location,
+        clientCreatedAt: report.clientCreatedAt,
+        receivedAt: serverTimestamp(),
+        synced: true,
+      };
+
+      if (report.preliminaryNeed) firestoreData.preliminaryNeed = report.preliminaryNeed;
+      if (report.photoBase64) firestoreData.photoBase64 = report.photoBase64;
+      if (report.audioBase64) firestoreData.audioBase64 = report.audioBase64;
+      if (report.audioDurationSec !== undefined) firestoreData.audioDurationSec = report.audioDurationSec;
+      if (report.contactPhone) firestoreData.contactPhone = report.contactPhone;
+
+      await setDoc(reportRef, firestoreData, { merge: true });
+      console.log(`[RESQ-Dispatch] Written report ${report.id} to Firestore collection "reports".`);
     } catch (err) {
       console.error('[RESQ-Dispatch] Firestore sync error:', err);
       throw err;
@@ -212,6 +278,44 @@ async function syncSingleReport(report: FloodReport): Promise<FloodReport> {
   });
 
   return updatedReport;
+}
+
+// Subscribe to real-time reports stream from Firestore and offline queue
+export function subscribeReports(callback: (reports: FloodReport[]) => void): () => void {
+  let isSubscribed = true;
+
+  const triggerUpdate = async () => {
+    if (!isSubscribed) return;
+    const all = await getAllReports();
+    callback(all);
+  };
+
+  let unsubscribeFirestore: (() => void) | null = null;
+  if (isFirebaseConfigured && db) {
+    try {
+      const reportsColl = collection(db, 'reports');
+      unsubscribeFirestore = onSnapshot(reportsColl, () => {
+        triggerUpdate();
+      }, (err) => {
+        console.warn('[RESQ-Dispatch] Firestore snapshot listener warning:', err);
+      });
+    } catch (err) {
+      console.warn('[RESQ-Dispatch] Could not initialize Firestore snapshot:', err);
+    }
+  }
+
+  const unsubscribeQueue = subscribeQueueStatus(() => {
+    triggerUpdate();
+  });
+
+  // Initial trigger
+  triggerUpdate();
+
+  return () => {
+    isSubscribed = false;
+    if (unsubscribeFirestore) unsubscribeFirestore();
+    unsubscribeQueue();
+  };
 }
 
 // Flush all offline queued reports idempotently

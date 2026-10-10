@@ -3,6 +3,7 @@ import { UserRole, FloodReport } from './types/report';
 import { 
   QueueStatus, 
   subscribeQueueStatus, 
+  subscribeReports,
   getAllReports, 
   flushOfflineQueue 
 } from './services/offlineQueue';
@@ -32,16 +33,21 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    loadReports();
-
-    // Subscribe to offline queue changes
-    const unsubscribe = subscribeQueueStatus((status) => {
-      setQueueStatus(status);
-      loadReports();
+    // Real-time Firestore stream + offline queue reports
+    const unsubscribeReports = subscribeReports((updatedReports) => {
+      setReports(updatedReports);
     });
 
-    return () => unsubscribe();
-  }, [loadReports]);
+    // Offline queue badge status
+    const unsubscribeQueue = subscribeQueueStatus((status) => {
+      setQueueStatus(status);
+    });
+
+    return () => {
+      unsubscribeReports();
+      unsubscribeQueue();
+    };
+  }, []);
 
   const handleFlush = async () => {
     await flushOfflineQueue();

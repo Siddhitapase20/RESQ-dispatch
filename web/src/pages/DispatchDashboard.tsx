@@ -127,9 +127,16 @@ export const DispatchDashboard: React.FC<Props> = ({ reports, onRefresh }) => {
                     )}
                   </div>
 
-                  <div className="text-[11px] text-slate-400 flex items-center gap-1 font-mono">
-                    <Clock className="w-3 h-3" />
-                    <span>{new Date(report.clientCreatedAt).toLocaleTimeString()}</span>
+                  <div className="text-[11px] text-slate-400 flex items-center gap-2 font-mono">
+                    <span className="flex items-center gap-1" title="Client creation time">
+                      <Clock className="w-3 h-3" />
+                      <span>Captured: {new Date(report.clientCreatedAt).toLocaleTimeString()}</span>
+                    </span>
+                    {report.receivedAt && (
+                      <span className="text-emerald-600 font-semibold" title="Firestore receivedAt server timestamp">
+                        &bull; Firestore: {new Date(report.receivedAt).toLocaleTimeString()}
+                      </span>
+                    )}
                   </div>
                 </div>
 
