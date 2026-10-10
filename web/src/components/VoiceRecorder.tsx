@@ -62,7 +62,14 @@ export const VoiceRecorder: React.FC<Props> = ({ onAudioReady }) => {
       setIsRecording(true);
 
       timerIntervalRef.current = window.setInterval(() => {
-        setRecordDuration((prev) => prev + 1);
+        setRecordDuration((prev) => {
+          if (prev >= 29) {
+            // Auto-stop at 30 seconds max to respect Firestore document size limits
+            setTimeout(() => stopRecording(), 0);
+            return 30;
+          }
+          return prev + 1;
+        });
       }, 1000);
     } catch (err: any) {
       console.error('Error accessing microphone:', err);
@@ -128,7 +135,7 @@ export const VoiceRecorder: React.FC<Props> = ({ onAudioReady }) => {
                 <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-600"></span>
               </span>
               <span className="text-xs font-mono font-bold tracking-wider">
-                RECORDING {formatTime(recordDuration)}
+                RECORDING {formatTime(recordDuration)} / 0:30
               </span>
               <button
                 type="button"

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FloodReport, LocationData, NeedType } from '../types/report';
 import { submitReport } from '../services/offlineQueue';
+import { triggerGeminiExtraction } from '../services/aiService';
 import { VoiceRecorder } from '../components/VoiceRecorder';
 import { PhotoUploader } from '../components/PhotoUploader';
 import { LocationPicker } from '../components/LocationPicker';
@@ -57,9 +58,16 @@ export const CitizenReport: React.FC<Props> = ({ reports, onReportCreated, isOff
 
       setSubmitFeedback(
         created.synced
-          ? 'SOS Report synced immediately to cloud dispatch!'
+          ? 'SOS Report synced immediately to cloud dispatch! AI extraction started.'
           : 'Network offline: SOS Report saved in local queue. Will auto-sync when online.'
       );
+
+      // Auto-trigger Gemini extraction when synced online
+      if (created.synced && !isOfflineMode) {
+        triggerGeminiExtraction(created.id, created).catch((err) => {
+          console.warn('[RESQ-Dispatch] Extraction trigger:', err.message);
+        });
+      }
 
       // Reset form
       setText('');

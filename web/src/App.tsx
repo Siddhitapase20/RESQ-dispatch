@@ -76,6 +76,7 @@ export function App() {
           <DispatchDashboard
             reports={reports}
             onRefresh={loadReports}
+            isOffline={queueStatus.isSimulatedOffline || !queueStatus.isBrowserOnline}
           />
         )}
 

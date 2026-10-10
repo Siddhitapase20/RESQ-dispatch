@@ -1,13 +1,33 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { FloodReport } from '../types/report';
 import { AlertCircle, LifeBuoy, MapPin, Sparkles, Clock, RefreshCw } from 'lucide-react';
+import { AIExtractionCard } from '../components/AIExtractionCard';
+import { triggerGeminiExtraction } from '../services/aiService';
 
 interface Props {
   reports: FloodReport[];
   onRefresh: () => void;
+  isOffline?: boolean;
 }
 
-export const DispatchDashboard: React.FC<Props> = ({ reports, onRefresh }) => {
+export const DispatchDashboard: React.FC<Props> = ({ reports, onRefresh, isOffline = false }) => {
+  const [extractingMap, setExtractingMap] = useState<Record<string, boolean>>({});
+
+  const handleRerunExtraction = async (reportId: string, rep: FloodReport) => {
+    if (isOffline) {
+      alert('Cannot run Gemini extraction while in offline mode.');
+      return;
+    }
+    setExtractingMap((prev) => ({ ...prev, [reportId]: true }));
+    try {
+      await triggerGeminiExtraction(reportId, rep);
+      onRefresh();
+    } catch (err: any) {
+      console.warn('Extraction trigger warning:', err?.message);
+    } finally {
+      setExtractingMap((prev) => ({ ...prev, [reportId]: false }));
+    }
+  };
   const syncedReports = reports.filter((r) => r.synced);
   const queuedReports = reports.filter((r) => !r.synced);
 
@@ -109,12 +129,12 @@ export const DispatchDashboard: React.FC<Props> = ({ reports, onRefresh }) => {
                 className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-slate-50 transition-colors space-y-2"
               >
                 <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="font-mono text-xs font-bold text-slate-700">
                       {report.id}
                     </span>
-                    <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">
-                      Need: {report.preliminaryNeed || 'general'}
+                    <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                      Citizen Category: {report.preliminaryNeed || 'unspecified'}
                     </span>
                     {report.synced ? (
                       <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
@@ -141,7 +161,7 @@ export const DispatchDashboard: React.FC<Props> = ({ reports, onRefresh }) => {
                 </div>
 
                 <p className="text-xs text-slate-800 leading-relaxed font-medium">
-                  {report.text || 'No text note provided.'}
+                  {report.text || '(No text message - voice or photo SOS)'}
                 </p>
 
                 <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500 pt-1 border-t border-slate-200/70">
@@ -162,11 +182,33 @@ export const DispatchDashboard: React.FC<Props> = ({ reports, onRefresh }) => {
                       ✓ Audio voice message attached ({report.audioDurationSec || 0}s)
                     </span>
                   )}
-                  <span className="ml-auto text-[10px] text-slate-400 flex items-center gap-1">
-                    <Sparkles className="w-3 h-3 text-amber-500" />
-                    Phase 2 Gemini extraction ready
-                  </span>
                 </div>
+
+                {/* Phase 2: Gemini AI Extraction Card */}
+                {report.aiExtracted || report.aiStatus ? (
+                  <AIExtractionCard
+                    report={report}
+                    onRerun={() => handleRerunExtraction(report.id, report)}
+                    isExtracting={Boolean(extractingMap[report.id]) || report.aiStatus === 'extracting'}
+                    isOffline={isOffline}
+                  />
+                ) : (
+                  <div className="pt-2 flex items-center justify-between">
+                    <span className="text-[11px] text-slate-400 italic">
+                      Awaiting AI extraction...
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleRerunExtraction(report.id, report)}
+                      disabled={Boolean(extractingMap[report.id]) || isOffline}
+                      className="flex items-center gap-1.5 px-3 py-1 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-semibold shadow-2xs disabled:opacity-40 transition-colors"
+                      title={isOffline ? "Cannot run Gemini extraction while offline" : "Extract structured rescue needs using Gemini"}
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>{extractingMap[report.id] ? 'Extracting...' : 'Extract with Gemini'}</span>
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

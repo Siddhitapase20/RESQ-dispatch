@@ -43,8 +43,14 @@ export interface FloodReport {
   // Offline sync flags
   synced: boolean;
   
-  // Phase 2-6 enhancements
+  // Phase 2: AI extraction & Dispatcher overrides
   aiExtracted?: AIExtractedData;
+  aiStatus?: 'pending' | 'extracting' | 'done' | 'failed';
+  aiError?: string;
+  aiExtractedAt?: string;
+  dispatcherEdits?: Partial<AIExtractedData> & { editedAt?: string };
+  
+  // Phase 3-6 enhancements
   incidentId?: string;
   urgency?: number;
   confidence?: number;
